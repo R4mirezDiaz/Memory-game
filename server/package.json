@@ -1,0 +1,24 @@
+{
+  "name": "memorama-websocket-server",
+  "version": "1.0.0",
+  "description": "WebSocket server for Memorama multiplayer game",
+  "main": "websocket-server.js",
+  "scripts": {
+    "ws": "tsx websocket-server.ts",
+    "ws:dev": "tsx watch websocket-server.ts",
+    "build": "tsc websocket-server.ts",
+    "start": "node websocket-server.js"
+  },
+  "dependencies": {
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.0",
+    "@types/ws": "^8.5.8",
+    "tsx": "^4.0.0",
+    "typescript": "^5.2.2"
+  },
+  "keywords": ["websocket", "memorama", "multiplayer", "game"],
+  "author": "v0",
+  "license": "MIT"
+}

@@ -5,6 +5,7 @@ import { GeistMono } from "geist/font/mono"
 import "./globals.css"
 import { GameProvider } from "@/contexts/game-context"
 import { ThemeProvider } from "@/contexts/theme-context"
+import { WebSocketProvider } from "@/contexts/websocket-context"
 
 export const metadata: Metadata = {
   title: "Memorama Kids",
@@ -30,7 +31,9 @@ html {
       </head>
       <body>
         <ThemeProvider>
-          <GameProvider>{children}</GameProvider>
+          <WebSocketProvider>
+            <GameProvider>{children}</GameProvider>
+          </WebSocketProvider>
         </ThemeProvider>
       </body>
     </html>

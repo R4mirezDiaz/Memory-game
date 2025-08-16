@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Plus, Package, Edit, Trash2, ImageIcon, Download, Upload } from "lucide-react"
+import { Plus, Package, Edit, Trash2, ImageIcon, Download, Upload, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -9,12 +9,18 @@ import type { ImagePackage } from "@/types/game"
 import { StorageManager } from "@/lib/storage"
 import { useAudio } from "@/hooks/use-audio"
 import { useGame } from "@/contexts/game-context"
+import { useWebSocket } from "@/contexts/websocket-context"
 import { PackageEditor } from "./package-editor"
 import { GameSetup } from "./game-setup"
 import { MemoryGame } from "./memory-game"
+import { MultiplayerMemoryGame } from "./multiplayer-memory-game"
+import { RoomLobby } from "./room-lobby"
+import { GuestJoin } from "./guest-join"
+import { GuestWaitingRoom } from "./guest-waiting-room"
 
 export function ImagePackageManager() {
   const { playButtonClick } = useAudio()
+  const { isConnected, roomId } = useWebSocket()
 
   const [packages, setPackages] = useState<ImagePackage[]>([])
   const [editingPackage, setEditingPackage] = useState<ImagePackage | null>(null)
@@ -22,6 +28,11 @@ export function ImagePackageManager() {
   const [showGameSetup, setShowGameSetup] = useState(false)
   const [selectedPackage, setSelectedPackage] = useState<ImagePackage | null>(null)
   const [showGame, setShowGame] = useState(false)
+  const [showMultiplayerGame, setShowMultiplayerGame] = useState(false)
+  const [showRoomLobby, setShowRoomLobby] = useState(false)
+  const [showGuestJoin, setShowGuestJoin] = useState(false)
+  const [showGuestWaiting, setShowGuestWaiting] = useState(false)
+  const [guestRoomId, setGuestRoomId] = useState<string | null>(null)
 
   const { gameConfig, currentPackage } = useGame()
 
@@ -31,12 +42,25 @@ export function ImagePackageManager() {
       setPackages(savedPackages)
     }
     loadPackages()
+
+    const urlParams = new URLSearchParams(window.location.search)
+    const roomParam = urlParams.get("room")
+    if (roomParam) {
+      setGuestRoomId(roomParam)
+      setShowGuestJoin(true)
+    }
   }, [])
 
   const handlePlayGame = (pkg: ImagePackage) => {
     playButtonClick()
     setSelectedPackage(pkg)
     setShowGameSetup(true)
+  }
+
+  const handlePlayMultiplayer = (pkg: ImagePackage) => {
+    playButtonClick()
+    setSelectedPackage(pkg)
+    setShowRoomLobby(true)
   }
 
   const handleEditPackage = (pkg: ImagePackage) => {
@@ -76,7 +100,13 @@ export function ImagePackageManager() {
 
   const handleStartGame = () => {
     setShowGameSetup(false)
-    setShowGame(true)
+    setShowRoomLobby(false)
+
+    if (isConnected && roomId) {
+      setShowMultiplayerGame(true)
+    } else {
+      setShowGame(true)
+    }
   }
 
   const handleBackFromSetup = () => {
@@ -84,14 +114,19 @@ export function ImagePackageManager() {
     setSelectedPackage(null)
   }
 
+  const handleBackFromRoomLobby = () => {
+    setShowRoomLobby(false)
+    setSelectedPackage(null)
+  }
+
   const handleBackFromGame = () => {
     setShowGame(false)
+    setShowMultiplayerGame(false)
     setSelectedPackage(null)
   }
 
   const handleExportPackage = (pkg: ImagePackage) => {
     playButtonClick()
-    // Only export packages with URL-based images
     const urlImages = pkg.images.filter((img) => img.url && !img.file)
     if (urlImages.length === 0) {
       alert("Este paquete no contiene imágenes por URL para exportar")
@@ -132,13 +167,11 @@ export function ImagePackageManager() {
         try {
           const importedData = JSON.parse(e.target?.result as string)
 
-          // Validate imported data
           if (!importedData.name || !importedData.images || !Array.isArray(importedData.images)) {
             alert("Archivo JSON inválido")
             return
           }
 
-          // Generate new ID to avoid conflicts
           const newPackage: ImagePackage = {
             ...importedData,
             id: Date.now().toString(),
@@ -158,6 +191,45 @@ export function ImagePackageManager() {
       reader.readAsText(file)
     }
     input.click()
+  }
+
+  const handleGuestJoined = () => {
+    setShowGuestJoin(false)
+    setShowGuestWaiting(true)
+  }
+
+  const handleGuestGameStart = () => {
+    setShowGuestWaiting(false)
+    setShowMultiplayerGame(true)
+  }
+
+  const handleGuestLeave = () => {
+    setShowGuestWaiting(false)
+    setGuestRoomId(null)
+    // Clear URL parameter
+    window.history.replaceState({}, document.title, window.location.pathname)
+  }
+
+  if (showGuestJoin && guestRoomId) {
+    return <GuestJoin roomId={guestRoomId} onJoined={handleGuestJoined} />
+  }
+
+  if (showGuestWaiting) {
+    return <GuestWaitingRoom onGameStart={handleGuestGameStart} onLeave={handleGuestLeave} />
+  }
+
+  if (showRoomLobby && selectedPackage) {
+    return (
+      <RoomLobby selectedPackage={selectedPackage} onStartGame={handleStartGame} onBack={handleBackFromRoomLobby} />
+    )
+  }
+
+  if (showMultiplayerGame && selectedPackage && gameConfig) {
+    return (
+      <div className="fixed inset-0 z-50">
+        <MultiplayerMemoryGame config={gameConfig} imagePackage={selectedPackage} onBack={handleBackFromGame} />
+      </div>
+    )
   }
 
   if (showGame && selectedPackage && gameConfig) {
@@ -240,8 +312,18 @@ export function ImagePackageManager() {
                       className="flex-1 bg-green-500 hover:bg-green-600 text-white"
                       disabled={pkg.images.length < 2}
                     >
-                      🎮 Jugar
+                      🎮 Solo
                     </Button>
+                    <Button
+                      onClick={() => handlePlayMultiplayer(pkg)}
+                      className="flex-1 bg-blue-500 hover:bg-blue-600 text-white"
+                      disabled={pkg.images.length < 2}
+                    >
+                      <Users className="w-4 h-4 mr-1" />
+                      Multi
+                    </Button>
+                  </div>
+                  <div className="flex gap-2 mb-4">
                     <Button
                       variant="outline"
                       size="icon"
