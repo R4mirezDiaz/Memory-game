@@ -7,6 +7,7 @@ import type { Player, GameRoom, WebSocketMessage } from "@/types/multiplayer"
 interface WebSocketContextType {
   socket: WebSocket | null
   isConnected: boolean
+  connectionError: string | null
   roomId: string | null
   playerId: string | null
   isHost: boolean
@@ -18,6 +19,7 @@ interface WebSocketContextType {
   createRoom: () => string
   joinRoom: (roomId: string, playerName: string) => void
   startGame: (gameConfig: any, imagePackage: any) => void
+  isWebSocketAvailable: boolean
 }
 
 const WebSocketContext = createContext<WebSocketContextType | undefined>(undefined)
@@ -33,59 +35,109 @@ export function useWebSocket() {
 export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const [socket, setSocket] = useState<WebSocket | null>(null)
   const [isConnected, setIsConnected] = useState(false)
+  const [connectionError, setConnectionError] = useState<string | null>(null)
   const [roomId, setRoomId] = useState<string | null>(null)
   const [playerId, setPlayerId] = useState<string | null>(null)
   const [isHost, setIsHost] = useState(false)
   const [players, setPlayers] = useState<Player[]>([])
   const [gameRoom, setGameRoom] = useState<GameRoom | null>(null)
+  const [reconnectAttempts, setReconnectAttempts] = useState(0)
+  const [isWebSocketAvailable, setIsWebSocketAvailable] = useState(true)
 
   const generateId = () => Math.random().toString(36).substring(2, 15)
+  const MAX_RECONNECT_ATTEMPTS = 3
 
   const connect = useCallback(
     (targetRoomId?: string) => {
-      if (socket?.readyState === WebSocket.OPEN) {
+      if (!isWebSocketAvailable || socket?.readyState === WebSocket.OPEN) {
+        return
+      }
+
+      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        console.log("[v0] Max reconnection attempts reached, disabling WebSocket")
+        setIsWebSocketAvailable(false)
+        setConnectionError("WebSocket server is not available. Multiplayer features are disabled.")
         return
       }
 
       const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080"
-      const newSocket = new WebSocket(wsUrl)
+      console.log("[v0] Attempting to connect to WebSocket:", wsUrl)
 
-      newSocket.onopen = () => {
-        console.log("[v0] WebSocket connected")
-        setIsConnected(true)
+      try {
+        const newSocket = new WebSocket(wsUrl)
 
-        if (targetRoomId) {
-          setRoomId(targetRoomId)
+        newSocket.onopen = () => {
+          console.log("[v0] WebSocket connected successfully")
+          setIsConnected(true)
+          setConnectionError(null)
+          setReconnectAttempts(0)
+
+          if (targetRoomId && isHost) {
+            console.log("[v0] Sending create_room message for room:", targetRoomId)
+            setTimeout(() => {
+              newSocket.send(
+                JSON.stringify({
+                  type: "create_room",
+                  payload: { roomId: targetRoomId, playerId },
+                  roomId: targetRoomId,
+                }),
+              )
+            }, 100)
+          } else if (targetRoomId) {
+            setRoomId(targetRoomId)
+          }
         }
-      }
 
-      newSocket.onmessage = (event) => {
-        try {
-          const message: WebSocketMessage = JSON.parse(event.data)
-          handleMessage(message)
-        } catch (error) {
-          console.error("[v0] Error parsing WebSocket message:", error)
+        newSocket.onmessage = (event) => {
+          try {
+            const message: WebSocketMessage = JSON.parse(event.data)
+            handleMessage(message)
+          } catch (error) {
+            console.error("[v0] Error parsing WebSocket message:", error)
+          }
         }
-      }
 
-      newSocket.onclose = () => {
-        console.log("[v0] WebSocket disconnected")
-        setIsConnected(false)
-        setSocket(null)
-      }
+        newSocket.onclose = (event) => {
+          console.log("[v0] WebSocket disconnected:", event.code, event.reason)
+          setIsConnected(false)
+          setSocket(null)
 
-      newSocket.onerror = (error) => {
-        console.error("[v0] WebSocket error:", error)
-      }
+          if (event.code !== 1000 && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            setReconnectAttempts((prev) => prev + 1)
+            setTimeout(
+              () => {
+                console.log(`[v0] Attempting reconnection ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS}`)
+                connect(targetRoomId)
+              },
+              2000 * (reconnectAttempts + 1),
+            )
+          }
+        }
 
-      setSocket(newSocket)
+        newSocket.onerror = (error) => {
+          console.error("[v0] WebSocket connection error")
+          setConnectionError("Failed to connect to multiplayer server")
+          setReconnectAttempts((prev) => prev + 1)
+
+          if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS - 1) {
+            setIsWebSocketAvailable(false)
+            setConnectionError("Multiplayer server is not available. Please try again later.")
+          }
+        }
+
+        setSocket(newSocket)
+      } catch (error) {
+        console.error("[v0] Error creating WebSocket:", error)
+        setConnectionError("Failed to create WebSocket connection")
+        setIsWebSocketAvailable(false)
+      }
     },
-    [socket],
+    [socket, reconnectAttempts, isWebSocketAvailable, isHost, playerId],
   )
 
   const disconnect = useCallback(() => {
     if (socket) {
-      socket.close()
+      socket.close(1000, "User disconnected")
       setSocket(null)
       setIsConnected(false)
       setRoomId(null)
@@ -93,6 +145,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       setIsHost(false)
       setPlayers([])
       setGameRoom(null)
+      setConnectionError(null)
     }
   }, [socket])
 
@@ -100,6 +153,9 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     (message: WebSocketMessage) => {
       if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message))
+      } else {
+        console.warn("[v0] Cannot send message: WebSocket not connected")
+        setConnectionError("Connection lost. Please reconnect.")
       }
     },
     [socket],
@@ -109,6 +165,13 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     console.log("[v0] Received message:", message)
 
     switch (message.type) {
+      case "room_created":
+        console.log("[v0] Room created successfully:", message.payload)
+        setRoomId(message.payload.roomId)
+        setPlayers(message.payload.players || [])
+        setGameRoom(message.payload.room)
+        break
+
       case "player_joined":
         setPlayers(message.payload.players)
         setGameRoom(message.payload.room)
@@ -144,36 +207,55 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
       case "error":
         console.error("[v0] WebSocket error:", message.payload)
+        setConnectionError(message.payload.message || "An error occurred")
         break
     }
   }
 
   const createRoom = useCallback(() => {
+    if (!isWebSocketAvailable) {
+      setConnectionError("Multiplayer is not available. WebSocket server is not running.")
+      return ""
+    }
+
     const newRoomId = generateId()
     const newPlayerId = generateId()
+
+    console.log("[v0] Creating room with ID:", newRoomId, "Player ID:", newPlayerId)
 
     setRoomId(newRoomId)
     setPlayerId(newPlayerId)
     setIsHost(true)
 
+    connect(newRoomId)
+
     return newRoomId
-  }, [])
+  }, [isWebSocketAvailable, connect])
 
   const joinRoom = useCallback(
     (targetRoomId: string, playerName: string) => {
+      if (!isWebSocketAvailable) {
+        setConnectionError("Cannot join room. Multiplayer server is not available.")
+        return
+      }
+
       const newPlayerId = generateId()
 
       setRoomId(targetRoomId)
       setPlayerId(newPlayerId)
       setIsHost(false)
 
-      sendMessage({
-        type: "join_room",
-        payload: { playerName, playerId: newPlayerId },
-        roomId: targetRoomId,
-      })
+      connect(targetRoomId)
+
+      setTimeout(() => {
+        sendMessage({
+          type: "join_room",
+          payload: { playerName, playerId: newPlayerId },
+          roomId: targetRoomId,
+        })
+      }, 1000)
     },
-    [sendMessage],
+    [sendMessage, connect, isWebSocketAvailable],
   )
 
   const startGame = useCallback(
@@ -198,6 +280,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const value: WebSocketContextType = {
     socket,
     isConnected,
+    connectionError,
     roomId,
     playerId,
     isHost,
@@ -209,6 +292,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     createRoom,
     joinRoom,
     startGame,
+    isWebSocketAvailable,
   }
 
   return <WebSocketContext.Provider value={value}>{children}</WebSocketContext.Provider>

@@ -59,8 +59,29 @@ export function ImagePackageManager() {
 
   const handlePlayMultiplayer = (pkg: ImagePackage) => {
     playButtonClick()
-    setSelectedPackage(pkg)
-    setShowRoomLobby(true)
+
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080"
+
+    // Check if WebSocket server is available
+    const testSocket = new WebSocket(wsUrl)
+
+    testSocket.onopen = () => {
+      testSocket.close()
+      setSelectedPackage(pkg)
+      setShowRoomLobby(true)
+    }
+
+    testSocket.onerror = () => {
+      alert("Servidor multijugador no disponible. Asegúrate de que el servidor WebSocket esté ejecutándose en " + wsUrl)
+    }
+
+    // Timeout after 3 seconds
+    setTimeout(() => {
+      if (testSocket.readyState === WebSocket.CONNECTING) {
+        testSocket.close()
+        alert("No se pudo conectar al servidor multijugador. Verifica que esté ejecutándose.")
+      }
+    }, 3000)
   }
 
   const handleEditPackage = (pkg: ImagePackage) => {
@@ -318,6 +339,7 @@ export function ImagePackageManager() {
                       onClick={() => handlePlayMultiplayer(pkg)}
                       className="flex-1 bg-blue-500 hover:bg-blue-600 text-white"
                       disabled={pkg.images.length < 2}
+                      title="Requiere servidor WebSocket ejecutándose"
                     >
                       <Users className="w-4 h-4 mr-1" />
                       Multi

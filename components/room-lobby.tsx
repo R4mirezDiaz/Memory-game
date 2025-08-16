@@ -34,15 +34,16 @@ export function RoomLobby({ selectedPackage, onStartGame, onBack }: RoomLobbyPro
   }, [isHost, roomId])
 
   useEffect(() => {
-    if (!isConnected) {
+    if (!isConnected && !roomId) {
+      console.log("[v0] Connecting to WebSocket from RoomLobby")
       connect()
     }
-  }, [isConnected, connect])
+  }, [isConnected, connect, roomId])
 
   const handleCreateRoom = () => {
     playButtonClick()
-    const newRoomId = createRoom()
-    connect(newRoomId)
+    console.log("[v0] Creating new room...")
+    createRoom()
   }
 
   const handleCopyRoomUrl = async () => {
@@ -88,6 +89,12 @@ export function RoomLobby({ selectedPackage, onStartGame, onBack }: RoomLobbyPro
                 Paquete: {selectedPackage.name}
               </Badge>
             </div>
+
+            {!isConnected && (
+              <div className="text-center p-2 bg-yellow-500/20 rounded border border-yellow-400/30">
+                <p className="text-yellow-200 text-sm">Conectando al servidor...</p>
+              </div>
+            )}
 
             <Button
               onClick={handleCreateRoom}
