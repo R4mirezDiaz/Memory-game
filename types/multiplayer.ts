@@ -18,7 +18,10 @@ export interface GameRoom {
 
 export interface WebSocketMessage {
   type:
+    | "create_room"
     | "join_room"
+    | "connection_established"
+    | "room_created"
     | "player_joined"
     | "player_left"
     | "game_start"

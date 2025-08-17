@@ -35,6 +35,7 @@ export function ImagePackageManager() {
   const [guestRoomId, setGuestRoomId] = useState<string | null>(null)
 
   const { gameConfig, currentPackage } = useGame()
+  const { gameState } = useWebSocket()
 
   useEffect(() => {
     const loadPackages = async () => {
@@ -51,6 +52,15 @@ export function ImagePackageManager() {
     }
   }, [])
 
+  // Escuchar cambios en el estado del juego para el anfitrión
+  useEffect(() => {
+    if (gameState.gameState === 'playing' && gameState.isHost && showRoomLobby) {
+      console.log('🎮 [ImagePackageManager] Anfitrión: Juego iniciado, cambiando a MultiplayerGame')
+      setShowRoomLobby(false)
+      setShowMultiplayerGame(true)
+    }
+  }, [gameState.gameState, gameState.isHost, showRoomLobby])
+
   const handlePlayGame = (pkg: ImagePackage) => {
     playButtonClick()
     setSelectedPackage(pkg)
@@ -58,30 +68,21 @@ export function ImagePackageManager() {
   }
 
   const handlePlayMultiplayer = (pkg: ImagePackage) => {
+    console.log('🎮 Iniciando modo multijugador para paquete:', pkg.name)
     playButtonClick()
-
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080"
-
-    // Check if WebSocket server is available
-    const testSocket = new WebSocket(wsUrl)
-
-    testSocket.onopen = () => {
-      testSocket.close()
+    
+    // Verificar si ya hay conexión WebSocket
+    if (isConnected) {
+      console.log('✅ WebSocket ya conectado, mostrando lobby')
+      setSelectedPackage(pkg)
+      setShowRoomLobby(true)
+    } else {
+      console.log('⚠️ WebSocket no conectado, intentando conectar...')
+      // El WebSocketProvider ya maneja la conexión automáticamente
+      // Solo necesitamos mostrar el lobby
       setSelectedPackage(pkg)
       setShowRoomLobby(true)
     }
-
-    testSocket.onerror = () => {
-      alert("Servidor multijugador no disponible. Asegúrate de que el servidor WebSocket esté ejecutándose en " + wsUrl)
-    }
-
-    // Timeout after 3 seconds
-    setTimeout(() => {
-      if (testSocket.readyState === WebSocket.CONNECTING) {
-        testSocket.close()
-        alert("No se pudo conectar al servidor multijugador. Verifica que esté ejecutándose.")
-      }
-    }, 3000)
   }
 
   const handleEditPackage = (pkg: ImagePackage) => {
@@ -121,11 +122,15 @@ export function ImagePackageManager() {
 
   const handleStartGame = () => {
     setShowGameSetup(false)
-    setShowRoomLobby(false)
-
+    
+    // Para modo multijugador, no cambiar inmediatamente la pantalla
+    // El useEffect se encargará de cambiar cuando reciba game_started del servidor
     if (isConnected && roomId) {
-      setShowMultiplayerGame(true)
+      console.log('🎮 [ImagePackageManager] Anfitrión iniciando juego, esperando confirmación del servidor')
+      // Mantener showRoomLobby=true hasta recibir confirmación
     } else {
+      // Para modo single player, cambiar inmediatamente
+      setShowRoomLobby(false)
       setShowGame(true)
     }
   }
@@ -220,8 +225,10 @@ export function ImagePackageManager() {
   }
 
   const handleGuestGameStart = () => {
+    console.log('🎮 [ImagePackageManager] handleGuestGameStart llamado')
     setShowGuestWaiting(false)
     setShowMultiplayerGame(true)
+    console.log('🎮 [ImagePackageManager] Transición a MultiplayerGame completada')
   }
 
   const handleGuestLeave = () => {
@@ -245,10 +252,27 @@ export function ImagePackageManager() {
     )
   }
 
-  if (showMultiplayerGame && selectedPackage && gameConfig) {
+  if (showMultiplayerGame) {
+    // Para invitados, el juego puede iniciarse sin selectedPackage y gameConfig locales
+    // ya que el servidor maneja toda la lógica del juego
+    const config = gameConfig || { 
+      difficulty: "medium", 
+      pairs: 2, 
+      players: ["Anfitrión"], 
+      selectedPackage: "server" 
+    }
+    const packageData = selectedPackage || { 
+      id: "server", 
+      name: "Servidor", 
+      description: "Paquete del servidor",
+      images: [{ id: "placeholder", url: "", name: "Placeholder", type: "url" }],
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }
+    
     return (
       <div className="fixed inset-0 z-50">
-        <MultiplayerMemoryGame config={gameConfig} imagePackage={selectedPackage} onBack={handleBackFromGame} />
+        <MultiplayerMemoryGame config={config} imagePackage={packageData} onBack={handleBackFromGame} />
       </div>
     )
   }

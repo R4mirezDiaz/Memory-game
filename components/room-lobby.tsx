@@ -19,31 +19,60 @@ interface RoomLobbyProps {
 
 export function RoomLobby({ selectedPackage, onStartGame, onBack }: RoomLobbyProps) {
   const { playButtonClick } = useAudio()
-  const { roomId, isHost, players, gameRoom, isConnected, connect, createRoom, startGame } = useWebSocket()
+  const { 
+    gameState, 
+    connect, 
+    createRoom, 
+    startGame, 
+    getRoomUrl,
+    clearError 
+  } = useWebSocket()
+  
+  const { 
+    roomId, 
+    playerId, 
+    players, 
+    isHost, 
+    isConnected, 
+    error 
+  } = gameState
 
   const [copied, setCopied] = useState(false)
   const [roomUrl, setRoomUrl] = useState("")
   const [showQR, setShowQR] = useState(false)
 
+  // Debug logs para entender el estado
+  console.log('🎮 [RoomLobby] Estado actual del componente:', {
+    isConnected,
+    roomId,
+    playerId,
+    isHost,
+    gameState,
+    roomUrl
+  })
+
   useEffect(() => {
     if (isHost && roomId) {
-      const baseUrl = window.location.origin
-      const url = `${baseUrl}?room=${roomId}`
+      const url = getRoomUrl()
       setRoomUrl(url)
     }
-  }, [isHost, roomId])
+  }, [isHost, roomId, getRoomUrl])
 
-  useEffect(() => {
-    if (!isConnected && !roomId) {
-      console.log("[v0] Connecting to WebSocket from RoomLobby")
-      connect()
-    }
-  }, [isConnected, connect, roomId])
+  // Removed automatic connection effect to prevent infinite loops
+  // Connection will be handled explicitly by createRoom() function
 
   const handleCreateRoom = () => {
+    console.log('🎮 [RoomLobby] Botón Crear Sala clickeado')
+    console.log('🎮 [RoomLobby] Estado actual:', {
+      isConnected,
+      roomId,
+      playerId,
+      isHost
+    })
     playButtonClick()
-    console.log("[v0] Creating new room...")
-    createRoom()
+    console.log('🎮 [RoomLobby] Llamando createRoom...')
+    createRoom("Anfitrión", { difficulty: "medium" })
+    console.log('🎮 [RoomLobby] createRoom ejecutado')
   }
 
   const handleCopyRoomUrl = async () => {
@@ -65,7 +94,7 @@ export function RoomLobby({ selectedPackage, onStartGame, onBack }: RoomLobbyPro
   const handleStartGame = () => {
     playButtonClick()
     if (isHost && players.length >= 1) {
-      startGame({}, selectedPackage)
+      startGame({ difficulty: "medium" }, selectedPackage)
       onStartGame()
     }
   }
@@ -75,7 +104,30 @@ export function RoomLobby({ selectedPackage, onStartGame, onBack }: RoomLobbyPro
     onBack()
   }
 
-  if (!roomId && isHost) {
+
+
+
+
+  // Mostrar errores si existen
+  useEffect(() => {
+    if (error) {
+      console.error('Error WebSocket:', error)
+      // Limpiar error después de 5 segundos
+      setTimeout(() => clearError(), 5000)
+    }
+  }, [error, clearError])
+  
+  // Debug de condiciones de renderizado
+  console.log('🎮 [RoomLobby] Condiciones de renderizado:', {
+    'roomId es null/undefined': !roomId,
+    'isHost es true': isHost,
+    'mostrar crear sala': !roomId,
+    'mostrar sala existente': roomId
+  })
+
+  if (!roomId) {
+    // Renderizando pantalla de crear sala
+    console.log('🎮 [RoomLobby] Renderizando pantalla CREAR SALA')
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-400 via-cyan-500 to-teal-500 p-4 flex items-center justify-center">
         <Card className="w-full max-w-md bg-white/10 backdrop-blur-sm border-white/20">
@@ -93,6 +145,12 @@ export function RoomLobby({ selectedPackage, onStartGame, onBack }: RoomLobbyPro
             {!isConnected && (
               <div className="text-center p-2 bg-yellow-500/20 rounded border border-yellow-400/30">
                 <p className="text-yellow-200 text-sm">Conectando al servidor...</p>
+              </div>
+            )}
+
+            {error && (
+              <div className="text-center p-2 bg-red-500/20 rounded border border-red-400/30">
+                <p className="text-red-200 text-sm">{error}</p>
               </div>
             )}
 
@@ -119,6 +177,8 @@ export function RoomLobby({ selectedPackage, onStartGame, onBack }: RoomLobbyPro
     )
   }
 
+  // Renderizando pantalla de lobby
+  console.log('🎮 [RoomLobby] Renderizando pantalla SALA EXISTENTE')
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-400 via-cyan-500 to-teal-500 p-4">
       <div className="container mx-auto max-w-6xl">
@@ -251,6 +311,21 @@ export function RoomLobby({ selectedPackage, onStartGame, onBack }: RoomLobbyPro
           )}
         </div>
       </div>
+    </div>
+  )
+
+  // Pantalla por defecto (esperando conexión o estado indefinido)
+  console.log('🎮 [RoomLobby] Renderizando pantalla POR DEFECTO (Conectando...)')
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-purple-600 via-pink-600 to-red-600 flex items-center justify-center p-4">
+      <Card className="w-full max-w-md bg-black/20 backdrop-blur-sm border-white/20">
+        <CardHeader className="text-center">
+          <CardTitle className="text-white text-2xl">Conectando...</CardTitle>
+          <CardDescription className="text-white/80">
+            Estableciendo conexión con el servidor
+          </CardDescription>
+        </CardHeader>
+      </Card>
     </div>
   )
 }

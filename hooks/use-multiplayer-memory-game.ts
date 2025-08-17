@@ -9,19 +9,28 @@ import { useWebSocket } from "@/contexts/websocket-context"
 
 export function useMultiplayerMemoryGame(config: GameConfig, imagePackage: ImagePackage) {
   const { playCardFlip, playMatchFound, playNoMatch, playGameWin, playStreakBonus, playPerfectMatch } = useAudio()
-  const { isHost, sendMessage, roomId, playerId, players } = useWebSocket()
+  const { gameState: wsGameState, flipCard } = useWebSocket()
+  const { roomId, playerId, players, isHost, cards, flippedCards, matchedPairs, currentTurn } = wsGameState
 
-  if (!config || !config.players || !imagePackage || !imagePackage.images) {
+  // Función temporal para sendMessage - esto debería venir del contexto WebSocket
+  const sendMessage = useCallback((message: any) => {
+    console.warn('sendMessage no implementado:', message)
+  }, [])
+
+  // Para invitados, el servidor maneja toda la lógica del juego, por lo que no necesitamos validar config e imagePackage
+  // Solo validamos para el anfitrión que necesita inicializar el juego localmente
+  // En modo multijugador, la configuración viene del servidor a través del WebSocket
+  if (isHost && wsGameState.gameState === 'setup' && (!config || !config.players || config.players.length === 0 || !imagePackage || !imagePackage.images || imagePackage.images.length === 0)) {
     throw new Error("Invalid game configuration or image package")
   }
 
   const [gameState, setGameState] = useState<GameState>({
-    cards: [],
+    cards: cards || [],
     currentPlayer: 0,
     scores: {},
-    flippedCards: [],
-    matchedPairs: [],
-    gameStatus: "setup",
+    flippedCards: flippedCards || [],
+    matchedPairs: matchedPairs || [],
+    gameStatus: wsGameState.gameState === 'playing' ? 'playing' : wsGameState.gameState === 'finished' ? 'finished' : 'setup',
     moves: 0,
     streaks: {},
     bonusPoints: {},
@@ -39,11 +48,32 @@ export function useMultiplayerMemoryGame(config: GameConfig, imagePackage: Image
   const stableImagePackage = useMemo(() => imagePackage, [imagePackage])
 
   useEffect(() => {
-    if (players.length > 0 && gameState.currentPlayer < players.length) {
-      const currentPlayerObj = players[gameState.currentPlayer]
-      setIsMyTurn(currentPlayerObj?.id === playerId)
+    setIsMyTurn(currentTurn === playerId)
+  }, [currentTurn, playerId])
+
+  // Sincronizar estado local con WebSocket
+  useEffect(() => {
+    setGameState(prev => ({
+      ...prev,
+      cards: cards || [],
+      flippedCards: flippedCards || [],
+      matchedPairs: matchedPairs || [],
+      gameStatus: wsGameState.gameState === 'playing' ? 'playing' : wsGameState.gameState === 'finished' ? 'finished' : 'setup'
+    }))
+  }, [cards, flippedCards, matchedPairs, wsGameState.gameState])
+
+  // Sincronizar cartas volteadas con WebSocket
+  useEffect(() => {
+    if (cards && cards.length > 0) {
+      setGameState(prev => ({
+        ...prev,
+        cards: prev.cards.map((card, index) => ({
+          ...card,
+          isFlipped: flippedCards.includes(card.id) || matchedPairs.includes(card.id)
+        }))
+      }))
     }
-  }, [gameState.currentPlayer, players, playerId])
+  }, [flippedCards, matchedPairs, cards])
 
   const initializeGame = useCallback(() => {
     if (!isHost) return // Only host initializes the game
@@ -128,76 +158,33 @@ export function useMultiplayerMemoryGame(config: GameConfig, imagePackage: Image
     })
   }, [isHost, stableConfig.players, stableConfig.pairs, stableImagePackage.images, players, sendMessage, roomId])
 
-  const flipCard = useCallback(
+  const handleCardClick = useCallback(
     (cardId: string) => {
-      if (!isMyTurn) return // Only allow flipping on player's turn
-      if (gameState.gameStatus !== "playing") return
-      if (gameState.flippedCards.length >= 2) return
+      if (!isMyTurn) return // Solo permitir voltear en el turno del jugador
+      if (wsGameState.gameState !== "playing") return
+      if (wsGameState.flippedCards.length >= 2) return
 
-      const card = gameState.cards.find((c) => c.id === cardId)
+      const cardIndex = wsGameState.cards.findIndex((c: any) => c.id === cardId)
+      if (cardIndex === -1) return
+      
+      const card = wsGameState.cards[cardIndex]
       if (!card || card.isFlipped || card.isMatched) return
 
-      sendMessage({
-        type: "card_flip",
-        payload: {
-          cardId,
-          playerId,
-          playerName: players.find((p) => p.id === playerId)?.name || "Unknown",
-        },
-        roomId,
-      })
+      // Solo enviar al servidor, no actualizar estado local
+      flipCard(cardIndex)
+      playCardFlip()
     },
-    [isMyTurn, gameState.gameStatus, gameState.flippedCards, gameState.cards, sendMessage, roomId, playerId, players],
+    [isMyTurn, wsGameState.gameState, wsGameState.flippedCards, wsGameState.cards, flipCard, playCardFlip],
   )
 
+  // Manejar eventos de juego desde el WebSocket
   useEffect(() => {
-    const handleWebSocketMessage = (event: MessageEvent) => {
-      try {
-        const message = JSON.parse(event.data)
-
-        switch (message.type) {
-          case "game_state":
-            // Receive game state update from host
-            if (!isHost) {
-              setGameState(message.payload.gameState)
-              setPlayerMatches(message.payload.playerMatches)
-              if (message.payload.gameStartTime) {
-                setGameStartTime(new Date(message.payload.gameStartTime))
-              }
-            }
-            break
-
-          case "card_flip":
-            // Handle card flip from any player
-            handleCardFlip(message.payload.cardId, message.payload.playerName)
-            break
-
-          case "turn_change":
-            // Handle turn change
-            setGameState((prev) => ({
-              ...prev,
-              currentPlayer: message.payload.currentPlayer,
-            }))
-            break
-
-          case "game_end":
-            // Handle game end
-            setGameState((prev) => ({
-              ...prev,
-              gameStatus: "finished",
-            }))
-            setTimeout(() => playGameWin(), 500)
-            break
-        }
-      } catch (error) {
-        console.error("Error handling WebSocket message:", error)
-      }
+    if (wsGameState.gameState === 'finished') {
+      setTimeout(() => playGameWin(), 500)
     }
+  }, [wsGameState.gameState, playGameWin])
 
-    // This is a simplified approach - in a real implementation,
-    // you'd want to use the WebSocket context's message handling
-    return () => {}
-  }, [isHost, playGameWin])
+
 
   const handleCardFlip = useCallback(
     (cardId: string, playerName: string) => {
@@ -367,40 +354,45 @@ export function useMultiplayerMemoryGame(config: GameConfig, imagePackage: Image
   // Get current player
   const getCurrentPlayer = useCallback(() => {
     if (!players?.length) return "Jugador 1"
-    const currentPlayerObj = players[gameState.currentPlayer]
+    const currentPlayerObj = players.find(p => p.id === currentTurn)
     return currentPlayerObj?.name || players[0]?.name || "Jugador 1"
-  }, [players, gameState.currentPlayer])
+  }, [players, currentTurn])
 
   // Get winner(s)
   const getWinners = useCallback(() => {
-    if (gameState.gameStatus !== "finished") return []
+    if (wsGameState.gameState !== "finished" || !players?.length) return []
 
-    const maxScore = Math.max(...Object.values(gameState.scores))
-    return Object.entries(gameState.scores)
+    const scores = players.reduce((acc, player) => {
+      acc[player.name] = player.score || 0
+      return acc
+    }, {} as Record<string, number>)
+
+    const maxScore = Math.max(...Object.values(scores))
+    return Object.entries(scores)
       .filter(([, score]) => score === maxScore)
       .map(([player]) => player)
-  }, [gameState.gameStatus, gameState.scores])
+  }, [wsGameState.gameState, players])
 
   const getPlayerDetails = useCallback(() => {
     if (!players?.length) return []
 
     return players.map((player) => ({
       name: player.name,
-      score: gameState.scores[player.name] || 0,
+      score: player.score || 0, // Usar puntuación del WebSocket
       streak: gameState.streaks[player.name] || 0,
       bonusPoints: gameState.bonusPoints[player.name] || 0,
       perfectMatches: gameState.perfectMatches[player.name] || 0,
       matches: playerMatches[player.name] || 0,
+      wins: player.wins || 0,
       color: player.color,
-      isCurrentPlayer: players[gameState.currentPlayer]?.id === player.id,
+      isCurrentPlayer: currentTurn === player.id, // Usar currentTurn del WebSocket
     }))
   }, [
     players,
-    gameState.scores,
     gameState.streaks,
     gameState.bonusPoints,
     gameState.perfectMatches,
-    gameState.currentPlayer,
+    currentTurn,
     playerMatches,
   ])
 
@@ -437,7 +429,7 @@ export function useMultiplayerMemoryGame(config: GameConfig, imagePackage: Image
   return {
     gameState,
     timeElapsed,
-    flipCard,
+    flipCard: handleCardClick,
     initializeGame,
     getCurrentPlayer,
     getWinners,

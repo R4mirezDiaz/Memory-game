@@ -19,7 +19,8 @@ interface GuestJoinProps {
 
 export function GuestJoin({ roomId, onJoined }: GuestJoinProps) {
   const { playButtonClick } = useAudio()
-  const { connect, joinRoom, isConnected, gameRoom, players } = useWebSocket()
+  const { gameState, connect, joinRoom, clearError } = useWebSocket()
+  const { isConnected, players, error: wsError } = gameState
 
   const [playerName, setPlayerName] = useState("")
   const [isJoining, setIsJoining] = useState(false)
@@ -29,18 +30,27 @@ export function GuestJoin({ roomId, onJoined }: GuestJoinProps) {
   useEffect(() => {
     if (!isConnected && connectionAttempts < 3) {
       const timer = setTimeout(() => {
-        connect(roomId)
+        connect()
         setConnectionAttempts((prev) => prev + 1)
       }, 1000)
       return () => clearTimeout(timer)
     }
-  }, [isConnected, connect, roomId, connectionAttempts])
+  }, [isConnected, connect, connectionAttempts])
 
   useEffect(() => {
-    if (gameRoom && gameRoom.id === roomId) {
+    if (gameState.roomId === roomId && gameState.playerId) {
+      console.log('🎮 [GuestJoin] Jugador unido exitosamente, llamando onJoined()')
+      setIsJoining(false)
       onJoined()
     }
-  }, [gameRoom, roomId, onJoined])
+  }, [gameState.roomId, gameState.playerId, roomId, onJoined])
+
+  useEffect(() => {
+    if (wsError) {
+      setError(wsError)
+      setIsJoining(false)
+    }
+  }, [wsError])
 
   const handleJoinRoom = async () => {
     if (!playerName.trim()) {
@@ -69,9 +79,9 @@ export function GuestJoin({ roomId, onJoined }: GuestJoinProps) {
     playButtonClick()
     setIsJoining(true)
     setError("")
+    clearError()
 
     try {
-      const randomColor = PLAYER_COLORS[Math.floor(Math.random() * PLAYER_COLORS.length)]
       joinRoom(roomId, playerName.trim())
 
       // Set timeout for join attempt
@@ -95,7 +105,7 @@ export function GuestJoin({ roomId, onJoined }: GuestJoinProps) {
 
   const handleRetryConnection = () => {
     setConnectionAttempts(0)
-    connect(roomId)
+    connect()
   }
 
   return (

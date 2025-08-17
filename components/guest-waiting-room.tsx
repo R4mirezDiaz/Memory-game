@@ -15,7 +15,8 @@ interface GuestWaitingRoomProps {
 
 export function GuestWaitingRoom({ onGameStart, onLeave }: GuestWaitingRoomProps) {
   const { playButtonClick } = useAudio()
-  const { roomId, players, gameRoom, isConnected, disconnect } = useWebSocket()
+  const { gameState, disconnect } = useWebSocket()
+  const { roomId, players, isConnected, gameState: currentGameState } = gameState
 
   const [connectionStatus, setConnectionStatus] = useState<"connected" | "connecting" | "disconnected">("connecting")
 
@@ -28,10 +29,12 @@ export function GuestWaitingRoom({ onGameStart, onLeave }: GuestWaitingRoomProps
   }, [isConnected])
 
   useEffect(() => {
-    if (gameRoom?.gameState === "playing") {
+    console.log('🎮 [GuestWaitingRoom] Estado del juego cambió:', currentGameState)
+    if (currentGameState === "playing") {
+      console.log('🎮 [GuestWaitingRoom] Juego iniciado, llamando onGameStart()')
       onGameStart()
     }
-  }, [gameRoom?.gameState, onGameStart])
+  }, [currentGameState, onGameStart])
 
   const handleLeave = () => {
     playButtonClick()
@@ -99,19 +102,14 @@ export function GuestWaitingRoom({ onGameStart, onLeave }: GuestWaitingRoomProps
                 </Badge>
               </div>
 
-              {gameRoom && (
-                <div className="p-3 bg-white/5 rounded-lg border border-white/10">
-                  <p className="text-white font-medium mb-2">Información del Juego</p>
-                  <div className="space-y-1 text-sm">
-                    <p className="text-white/80">
-                      Paquete: <span className="text-white">{gameRoom.imagePackage?.name || "Cargando..."}</span>
-                    </p>
-                    <p className="text-white/80">
-                      Estado: <span className="text-white capitalize">{gameRoom.gameState}</span>
-                    </p>
-                  </div>
+              <div className="p-3 bg-white/5 rounded-lg border border-white/10">
+                <p className="text-white font-medium mb-2">Información del Juego</p>
+                <div className="space-y-1 text-sm">
+                  <p className="text-white/80">
+                    Estado: <span className="text-white capitalize">{currentGameState}</span>
+                  </p>
                 </div>
-              )}
+              </div>
 
               <Button
                 onClick={handleLeave}

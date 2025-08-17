@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { QrCode, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import QRCodeLib from "qrcode"
 
 interface QRCodeGeneratorProps {
   url: string
@@ -22,66 +23,17 @@ export function QRCodeGenerator({ url, roomId, onClose }: QRCodeGeneratorProps) 
       try {
         setIsGenerating(true)
 
-        // Simple QR code generation using a library-free approach
-        // For production, you might want to use a proper QR library
         const canvas = canvasRef.current
-        const ctx = canvas.getContext("2d")
-
-        if (!ctx) return
-
-        // Set canvas size
-        canvas.width = 200
-        canvas.height = 200
-
-        // Create a simple pattern for demonstration
-        // In a real implementation, you'd use a proper QR code library
-        ctx.fillStyle = "#ffffff"
-        ctx.fillRect(0, 0, 200, 200)
-
-        // Create a grid pattern to simulate QR code
-        ctx.fillStyle = "#000000"
-        const cellSize = 10
-        const gridSize = 20
-
-        // Generate a pseudo-random pattern based on the URL
-        const hash = url.split("").reduce((a, b) => {
-          a = (a << 5) - a + b.charCodeAt(0)
-          return a & a
-        }, 0)
-
-        for (let i = 0; i < gridSize; i++) {
-          for (let j = 0; j < gridSize; j++) {
-            const seed = (i * gridSize + j + Math.abs(hash)) % 3
-            if (seed === 0) {
-              ctx.fillRect(i * cellSize, j * cellSize, cellSize, cellSize)
-            }
+        
+        // Generate QR code using the qrcode library
+        await QRCodeLib.toCanvas(canvas, url, {
+          width: 200,
+          margin: 2,
+          color: {
+            dark: '#000000',
+            light: '#FFFFFF'
           }
-        }
-
-        // Add corner markers (typical QR code feature)
-        const markerSize = 30
-        // Top-left
-        ctx.fillRect(0, 0, markerSize, markerSize)
-        ctx.fillStyle = "#ffffff"
-        ctx.fillRect(5, 5, markerSize - 10, markerSize - 10)
-        ctx.fillStyle = "#000000"
-        ctx.fillRect(10, 10, markerSize - 20, markerSize - 20)
-
-        // Top-right
-        ctx.fillStyle = "#000000"
-        ctx.fillRect(200 - markerSize, 0, markerSize, markerSize)
-        ctx.fillStyle = "#ffffff"
-        ctx.fillRect(200 - markerSize + 5, 5, markerSize - 10, markerSize - 10)
-        ctx.fillStyle = "#000000"
-        ctx.fillRect(200 - markerSize + 10, 10, markerSize - 20, markerSize - 20)
-
-        // Bottom-left
-        ctx.fillStyle = "#000000"
-        ctx.fillRect(0, 200 - markerSize, markerSize, markerSize)
-        ctx.fillStyle = "#ffffff"
-        ctx.fillRect(5, 200 - markerSize + 5, markerSize - 10, markerSize - 10)
-        ctx.fillStyle = "#000000"
-        ctx.fillRect(10, 200 - markerSize + 10, markerSize - 20, markerSize - 20)
+        })
 
         setIsGenerating(false)
       } catch (error) {

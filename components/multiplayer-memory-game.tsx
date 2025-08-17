@@ -47,7 +47,8 @@ interface MultiplayerMemoryGameProps {
 export function MultiplayerMemoryGame({ config, imagePackage, onBack }: MultiplayerMemoryGameProps) {
   const { playButtonClick } = useAudio()
   const { theme, toggleTheme } = useTheme()
-  const { isConnected, players, isHost, playerId } = useWebSocket()
+  const { gameState: wsGameState, isConnected, restartGame } = useWebSocket()
+  const { players, playerId } = wsGameState
 
   const [previousScores, setPreviousScores] = useState<Record<string, number>>({})
   const [showParticles, setShowParticles] = useState(false)
@@ -66,6 +67,7 @@ export function MultiplayerMemoryGame({ config, imagePackage, onBack }: Multipla
     resetGame,
     togglePause,
     isMyTurn,
+    isHost,
   } = useMultiplayerMemoryGame(config, imagePackage)
 
   const calculateCardDimensions = () => {
@@ -126,22 +128,23 @@ export function MultiplayerMemoryGame({ config, imagePackage, onBack }: Multipla
   }, [])
 
   useEffect(() => {
-    setPreviousScores(gameState.scores)
-  }, [gameState.scores])
+    setPreviousScores(wsGameState.scores || {})
+  }, [wsGameState.scores])
 
   useEffect(() => {
-    if (gameState.matchedPairs.length > lastMatchedPairs) {
+    const currentMatchedPairs = wsGameState.matchedPairs?.length || 0
+    if (currentMatchedPairs > lastMatchedPairs) {
       setShowParticles(true)
       setTimeout(() => setShowParticles(false), 100)
     }
-    setLastMatchedPairs(gameState.matchedPairs.length)
-  }, [gameState.matchedPairs.length, lastMatchedPairs])
+    setLastMatchedPairs(currentMatchedPairs)
+  }, [wsGameState.matchedPairs?.length, lastMatchedPairs])
 
   useEffect(() => {
-    if (gameState.gameStatus === "finished") {
+    if (wsGameState.gameState === "finished") {
       setShowConfetti(true)
     }
-  }, [gameState.gameStatus])
+  }, [wsGameState.gameState])
 
   if (!config || !config.players || !imagePackage || !imagePackage.images) {
     return (
@@ -166,12 +169,12 @@ export function MultiplayerMemoryGame({ config, imagePackage, onBack }: Multipla
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
   }
 
-  const progress = (gameState.matchedPairs.length / config.pairs) * 100
+  const progress = ((wsGameState.matchedPairs?.length || 0) / config.pairs) * 100
   const winners = getWinners()
   const playerDetails = getPlayerDetails()
   const currentPlayer = getCurrentPlayer()
-  const currentPlayerObj = players.find((p) => p.name === currentPlayer)
-  const myPlayer = players.find((p) => p.id === playerId)
+  const currentPlayerObj = wsGameState.players?.find((p) => p.name === currentPlayer)
+  const myPlayer = wsGameState.players?.find((p) => p.id === wsGameState.playerId)
 
   const handleBack = () => {
     playButtonClick()
@@ -208,7 +211,7 @@ export function MultiplayerMemoryGame({ config, imagePackage, onBack }: Multipla
                 <h1 className="text-xs font-bold text-white truncate">{imagePackage.name}</h1>
                 <div className="flex items-center gap-2">
                   <p className="text-white/80 text-xs">
-                    {config.pairs} parejas • {players.length} jugador{players.length > 1 ? "es" : ""}
+                    {config.pairs} parejas • {wsGameState.players?.length || 0} jugador{(wsGameState.players?.length || 0) > 1 ? "es" : ""}
                   </p>
                   <div className="flex items-center gap-1">
                     {isConnected ? (
@@ -240,7 +243,7 @@ export function MultiplayerMemoryGame({ config, imagePackage, onBack }: Multipla
               <div className="flex items-center gap-1 bg-white/10 rounded px-1 sm:px-2 py-1">
                 <Trophy className="w-3 h-3 text-white" />
                 <span className="text-white text-xs">
-                  {gameState.matchedPairs.length}/{config.pairs}
+                  {wsGameState.matchedPairs?.length || 0}/{config.pairs}
                 </span>
               </div>
             </div>
@@ -289,7 +292,7 @@ export function MultiplayerMemoryGame({ config, imagePackage, onBack }: Multipla
                     className="border-yellow-400/30 text-yellow-200 hover:bg-yellow-500/10 bg-transparent h-7 w-7 p-0"
                     title="Solo el anfitrión puede pausar"
                   >
-                    {gameState.gameStatus === "playing" ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                    {wsGameState.gameState === "playing" ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
                   </Button>
                   <Button
                     variant="outline"
@@ -352,7 +355,7 @@ export function MultiplayerMemoryGame({ config, imagePackage, onBack }: Multipla
           </div>
         )}
 
-        {gameState.gameStatus === "playing" && currentPlayerObj && (
+        {wsGameState.gameState === "playing" && currentPlayerObj && (
           <div className="px-1 sm:px-2 pb-2">
             <TurnIndicator
               currentPlayerName={currentPlayer}
@@ -364,41 +367,36 @@ export function MultiplayerMemoryGame({ config, imagePackage, onBack }: Multipla
           </div>
         )}
 
-        <div className="px-1 sm:px-2 pb-1">
-          <div className="flex gap-1 overflow-x-auto">
-            {playerDetails.map((player) => (
-              <div
-                key={player.name}
-                className={`flex items-center gap-1 bg-white/10 rounded px-1 sm:px-2 py-1 min-w-0 transition-all duration-300 ${
-                  player.isCurrentPlayer ? "ring-2 ring-yellow-400 bg-yellow-400/20" : ""
-                }`}
-              >
+        {/* Marcador de puntuación de jugadores */}
+        {wsGameState.players && wsGameState.players.length > 0 && (
+          <div className="px-1 sm:px-2 pb-2">
+            <div className="flex items-center justify-center gap-2 text-xs">
+              {wsGameState.players.map((player: any) => (
                 <div
-                  className={`w-2 h-2 sm:w-3 sm:h-3 rounded-full flex-shrink-0 transition-all duration-300 ${
-                    player.isCurrentPlayer ? "ring-1 ring-white animate-pulse" : ""
+                  key={player.id}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-full ${
+                    player.id === wsGameState.playerId
+                      ? "bg-white/20 border border-white/30"
+                      : "bg-white/10"
                   }`}
-                  style={{ backgroundColor: player.color }}
-                />
-                <span className="text-white text-xs truncate max-w-12 sm:max-w-16">{player.name}</span>
-                {/* Role indicator for each player */}
-                {players.find((p) => p.name === player.name)?.isHost && <Crown className="w-2 h-2 text-yellow-400" />}
-                <span className="text-white font-bold text-xs">{player.matches}</span>
-                {player.streak > 0 && (
-                  <StreakIndicator
-                    streak={player.streak}
-                    isActive={player.isCurrentPlayer && gameState.gameStatus === "playing"}
-                  />
-                )}
-              </div>
-            ))}
+                >
+                  {player.isHost && <Crown className="w-3 h-3 text-yellow-300" />}
+                  <span className="text-white font-medium">{player.name}</span>
+                  <span className="text-white/80">-</span>
+                  <span className="text-white font-bold">{player.score || 0}</span>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
+
+
       </div>
 
       <div className="flex-1 flex items-center justify-center p-1 min-h-0">
         <div
           className={`grid gap-1 transition-all duration-300 ${
-            !isMyTurn && gameState.gameStatus === "playing" ? "opacity-60 pointer-events-none" : ""
+            !isMyTurn && wsGameState.gameState === "playing" ? "opacity-60 pointer-events-none" : ""
           }`}
           style={{
             gridTemplateColumns: `repeat(${cardDimensions.cols}, ${cardDimensions.cardSize}px)`,
@@ -407,15 +405,15 @@ export function MultiplayerMemoryGame({ config, imagePackage, onBack }: Multipla
             height: `${cardDimensions.gridHeight}px`,
           }}
         >
-          {gameState.cards.map((card, index) => (
+          {wsGameState.cards.map((card: any, index: number) => (
             <GameCard
               key={card.id}
               card={card}
               index={index}
               onClick={() => flipCard(card.id)}
               disabled={
-                gameState.gameStatus !== "playing" ||
-                gameState.flippedCards.length >= 2 ||
+                wsGameState.gameState !== "playing" ||
+                wsGameState.flippedCards.length >= 2 ||
                 card.isFlipped ||
                 card.isMatched ||
                 !isMyTurn ||
@@ -449,7 +447,7 @@ export function MultiplayerMemoryGame({ config, imagePackage, onBack }: Multipla
       )}
 
       <AnimatePresence>
-        {gameState.gameStatus === "setup" && gameState.cards.length > 0 && (
+        {wsGameState.gameState === "setup" && wsGameState.cards.length > 0 && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -505,16 +503,19 @@ export function MultiplayerMemoryGame({ config, imagePackage, onBack }: Multipla
       </AnimatePresence>
 
       <AnimatePresence>
-        {gameState.gameStatus === "finished" && (
+        {wsGameState.gameState === "finished" && (
           <GameOverDialog
             winners={winners}
-            scores={gameState.scores}
+            scores={wsGameState.players?.reduce((acc, player) => {
+              acc[player.name] = player.score || 0
+              return acc
+            }, {} as Record<string, number>) || {}}
             timeElapsed={timeElapsed}
             moves={gameState.moves}
             streaks={gameState.streaks}
             bonusPoints={gameState.bonusPoints}
             perfectMatches={gameState.perfectMatches}
-            onPlayAgain={isHost ? resetGame : undefined} // Only host can restart
+            onPlayAgain={isHost ? restartGame : undefined} // Only host can restart
             onExit={onBack}
             isMultiplayer={true}
             isHost={isHost}
